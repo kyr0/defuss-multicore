@@ -1,0 +1,97 @@
+{
+  "name": "defuss-multicore",
+  "version": "0.1.0",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "description": "Isomorphic multicore execution + linear algebra. Web Workers (browser) + worker_threads (Node.js). Auto-split, loop-unrolled vector/matrix ops, parallel map/filter/reduce.",
+  "keywords": [
+    "multicore",
+    "parallel",
+    "worker",
+    "web-worker",
+    "worker-threads",
+    "isomorphic",
+    "matrix",
+    "vector",
+    "dotproduct",
+    "matmul",
+    "loop-unrolling",
+    "simd",
+    "typed-array"
+  ],
+  "repository": {
+    "url": "git+https://github.com/kyr0/defuss.git",
+    "type": "git"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "pretest": "npm run build",
+    "prebuild": "npm run clean",
+    "build": "pkgroll",
+    "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts --exclude src/benchmark.browser.test.ts",
+    "bench": "node --import tsx/esm src/bench.ts",
+    "bench:browser": "vitest --run --config vitest.browser.config.ts --testNamePattern=benchmark",
+    "prepublishOnly": "npm run build",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "test:production": "node scripts/production-smoke.mjs",
+    "test:package": "node scripts/package-smoke.mjs",
+    "bench:tasks": "node scripts/bench-tasks.mjs",
+    "verify": "npm run typecheck && npm test && npm run typecheck:examples && npm run test:browser && npm run test:production && npm run test:package",
+    "example:node": "node examples/node/main.mjs",
+    "example:dev": "vite examples/vite --config examples/vite/vite.config.ts",
+    "example:build": "vite build examples/vite --config examples/vite/vite.config.ts",
+    "typecheck:examples": "tsc -p examples/vite/tsconfig.json"
+  },
+  "author": "Aron Homberg <info@aron-homberg.de>",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      }
+    },
+    "./worker": {
+      "import": {
+        "types": "./dist/worker.d.mts",
+        "default": "./dist/worker.mjs"
+      },
+      "require": {
+        "types": "./dist/worker.d.cts",
+        "default": "./dist/worker.cjs"
+      }
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^18.17.1 || ^20.3.0 || >=21.0.0"
+  },
+  "devDependencies": {
+    "@vitest/browser": "^4.1.2",
+    "@vitest/browser-playwright": "^4.1.2",
+    "@vitest/coverage-v8": "^4.1.2",
+    "pkgroll": "^2.21.5",
+    "playwright": "^1.58.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2",
+    "@types/node": "^22.19.0",
+    "vite": "^7.3.1"
+  }
+}

@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"noEmit":true,"emitDeclarationOnly":false,"module":"ESNext","moduleResolution":"Bundler","lib":["ES2022","DOM"]},"include":["*.ts","../shared/*.d.mts"]}
