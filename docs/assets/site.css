@@ -163,7 +163,7 @@
   }
   .mc-demo-controls { display: grid; gap: 1rem 1.25rem; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) auto; align-items: end; margin-block-start: 2rem; }
   .mc-demo-field { display: flex; flex-direction: column; gap: .375rem; min-width: 0; }
-  .mc-demo-note { font-size: .75rem; line-height: 1.4; color: var(--muted-foreground); text-wrap: pretty; }
+  .mc-demo-note { grid-column: 1 / -1; font-size: .75rem; line-height: 1.4; color: var(--muted-foreground); text-wrap: pretty; }
   .mc-demo-field .select { width: 100%; }
   .mc-demo-run { align-self: end; }
   .mc-demo-progress { margin-block-start: 1.75rem; }
