@@ -252,9 +252,15 @@ if (demoForm) {
   const runsEl = document.getElementById("demo-runs");
   const RUNS = 5;
 
-  const cores = navigator.hardwareConcurrency || 4;
+  // navigator.hardwareConcurrency can under-report (Safari and hardened
+  // browsers cap it against fingerprinting) — so the pool is sized to honor
+  // every explicit choice, and the note names what the browser told us.
+  const reported = navigator.hardwareConcurrency || 4;
+  const poolCap = Math.max(8, reported);
   const allOption = workerSel.querySelector('option[value="all"]');
-  if (allOption) allOption.textContent = `All cores (${cores})`;
+  if (allOption) allOption.textContent = `All cores (auto: ${reported})`;
+  const coreNote = document.getElementById("demo-core-note");
+  if (coreNote) coreNote.textContent = `This browser reports ${reported} cores; some browsers under-report. Explicit counts always run exactly that many partitions.`;
 
   const demo = { lib: null, wrappers: {}, runs: [] };
   const setBar = (ratio) => {
@@ -268,10 +274,10 @@ if (demoForm) {
     event.preventDefault();
     const task = DEMO_TASKS[taskSel.value];
     const workers = workerSel.value;
-    const count = workers === "all" ? cores : Number(workers) || 0;
+    const count = workers === "all" ? reported : Number(workers) || 0;
     const runLabel = workers === "main"
       ? "main thread"
-      : `${count} worker${count === 1 ? "" : "s"}${workers === "all" ? " (all cores)" : ""}`;
+      : `${count} worker${count === 1 ? "" : "s"}${workers === "all" ? " (auto)" : ""}`;
 
     runBtn.disabled = true;
     taskSel.disabled = true;
@@ -300,10 +306,14 @@ if (demoForm) {
         const parallel = (demo.wrappers[taskSel.value] ??= demo.lib.multicore(task.fn, {
           threshold: task.threshold,
           reduce: task.reduce,
+          // spawn enough workers to honor every explicit choice, even when
+          // the browser under-reports the core count
+          cores: poolCap,
         }));
         const input = task.input();
-        // per-call cores override stays within the pool's worker cap
-        const expected = Math.min(count, cores);
+        // the pool cap covers every explicit count; "all cores" means the
+        // library default: what the browser reports
+        const expected = count;
         const totalSteps = RUNS * expected;
         let steps = 0;
         for (let run = 0; run < RUNS; run++) {
