@@ -1,13 +1,67 @@
 # defuss-multicore
 
-Isomorphic multicore execution + loop-unrolled linear algebra for JavaScript/TypeScript.
+[![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518.17.1-success)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](tsconfig.base.json)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-success)](package.json)
 
-- **Web Workers** in the browser, **worker_threads** in Node.js — same API
-- Auto-splits arrays/TypedArrays across CPU cores
-- JIT loop-unrolled vector/matrix ops (4x/8x/16x unroll factors, auto-selected)
-- Parallel `map`, `filter`, `reduce` for any array
-- Typed **module workers** with task pools: batching, streaming, priorities, timeouts, cancellation
-- Zero dependencies, ESM + CJS dual output
+**Multi**core for JavaScript: one `await` for every CPU core, zero dependencies.
+
+Web Workers in the browser and `worker_threads` in Node.js behind the same API and the same types. Pure functions are auto-split across cores, typed module workers get a real task pool, and the vector/matrix kernels are JIT loop-unrolled on the caller thread.
+
+## TL;DR
+
+A JavaScript runtime gives your code one thread. Heavy compute blocks the UI or the event loop, and no amount of `Promise.all` buys a second core.
+
+defuss-multicore moves compute to the cores you already have. It splits arrays and TypedArrays into compact partitions, runs each partition in a real worker, and hands the results back through one `await` — the same code in the browser and in Node.
+
+- 🔁 **Isomorphic:** Web Workers (browser) and `worker_threads` (Node.js) behind one API
+- ⚡ **Loop-unrolled kernels:** `matmul`, `dotProduct`, `matadd`, `matsub`, `matdiv` JIT-select 4x/8x/16x unroll factors
+- 🧮 **Parallel array methods:** `map`, `filter`, `reduce` for any array, auto-partitioned across cores
+- 🧩 **Typed module workers:** real ESM imports and module-local state, driven by an explicit task pool
+- 🚏 **A pool with a contract:** bounded queue, stable priorities, per-task timeouts, cancellation that stops running work
+- 🔒 **Explicit ownership:** `multicore()` transfers only internal partition copies — your buffers are never detached; pool transfers are opt-in and listed by you
+- 🧯 **Predictable failure:** a crashed worker rejects only its own active job; nothing is retried silently
+- 🪶 **Tiny:** zero runtime dependencies, ESM + CJS dual output, Node ≥ 18.17.1 and every modern browser
+
+## How it works
+
+```mermaid
+flowchart LR
+    U(["🙋 you"]) -->|"array + pure function"| S
+
+    subgraph split ["🔀 multicore()"]
+        S["partition
+auto-split arrays · broadcast scalars"]
+        S --> W1["worker 1"]
+        S --> W2["worker n"]
+    end
+
+    W1 --> R["reduce
+partials → one value"]
+    W2 --> R
+    R --> U
+```
+
+For real application code — imports, module state, async handlers — the second path is a typed task pool:
+
+```mermaid
+flowchart LR
+    A["your app"] -->|"run · batch · stream"| Q["bounded queue
+priority · timeout · signal"]
+    Q --> P["pool
+warmup → ready workers"]
+    P --> W["worker module
+expose(tasks) · init"]
+    W -->|"result · transfer(buffers)"| A
+```
+
+| API | When you reach for it | What it does |
+|---|---|---|
+| **`multicore(fn, options?)`** | batch data + a pure function | Wraps `fn` for parallel execution. Array/TypedArray args are auto-split across cores, scalars are broadcast to every worker, partial results are collected — or reduced to one value via `reduce`. Falls back to the main thread below `threshold`. |
+| **`map` / `filter` / `reduce`** | big arrays, familiar semantics | Parallel counterparts of the `Array.prototype` methods; the reducer must be associative. Pools are cached per callback and released explicitly via `releaseArrayWorkers`. |
+| **`createPool()` + `expose()`** | real application code | Typed module workers with normal ESM imports and module-local state: batching, streaming, priorities, timeouts, cancellation. Always worker execution — no size threshold, no silent main-thread fallback. |
+| **`dotProduct`, `matmul`, `matadd`, …** | numeric kernels | JIT loop-unrolled (4x/8x/16x, auto-selected) vector/matrix math, synchronous on the caller thread. Combine with `multicore()` or a pool to move them into workers. |
 
 ## Install
 
@@ -153,7 +207,7 @@ try {
 }
 ```
 
-Keep the `new Worker(new URL(..., import.meta.url), { type: "module" })` expression at the application call site so Vite can bundle the worker graph (use `worker.format: "es"` for top-level await). See `examples/node` and `examples/vite`.
+Keep the `new Worker(new URL(..., import.meta.url), { type: "module" })` expression at the application call site so Vite can bundle the worker graph (use `worker.format: "es"` for top-level await). See [examples/node](examples/node) and [examples/vite](examples/vite).
 
 #### Pool contract
 
@@ -231,7 +285,7 @@ import { getPoolSize } from "defuss-multicore";
 console.log(`Using ${getPoolSize()} cores`);
 ```
 
-## Types
+### Types
 
 ```ts
 type NumericArray = number[] | Float32Array | Float64Array | Int8Array | ...;
@@ -241,11 +295,11 @@ type Vectors<T>  = T[];       // Array of vectors
 interface ParallelResult<R> extends AsyncIterable<R>, PromiseLike<R[]> {}
 ```
 
-## Benchmark Results
+## Speed
 
 All benchmarks measured on Node.js (worker_threads) on Apple Silicon (10 cores). Median of 5 runs, 2 warmup. Reproduce with `bun run bench` (or `npm run bench`).
 
-### Loop-Unrolled Ops vs Naive Baseline
+### Loop-unrolled ops vs naive baseline
 
 Single-threaded comparison — same thread, unrolled kernels vs naive loops:
 
@@ -260,7 +314,7 @@ Single-threaded comparison — same thread, unrolled kernels vs naive loops:
 
 Loop unrolling shines on **compute-heavy inner loops** like matrix multiplication, where the unrolled kernel avoids branch overhead and allows the CPU to pipeline instructions. Element-wise ops (add/sub/div) benefit less because the operation per element is trivial — the memory access pattern dominates.
 
-### Multicore Workers vs Single-Thread
+### Multicore workers vs single-thread
 
 Worker parallelism — dispatching across all CPU cores vs running on the main thread:
 
@@ -287,18 +341,18 @@ Worker parallelism — dispatching across all CPU cores vs running on the main t
 
 Four warmed workers were ~2.55x faster than the caller thread, but cold startup exceeded the task duration, and one worker was *slower* than no workers. Persistent reuse and sufficiently large jobs matter.
 
-## When to Use `multicore()`
+## When to use it
 
 The benchmarks tell a clear story: **worker parallelism pays off when each chunk does meaningful CPU work**. The overhead of serializing data, posting messages, and collecting results is ~2-10ms per dispatch. If the per-chunk work is under that threshold, you lose.
 
-### DO: Parallelize These
+### DO: parallelize these
 
 - **Key derivation / password hashing** — thousands of rounds per item (4.9x speedup)
 - **Batch checksumming** (CRC32, SHA, etc.) of large messages — enough work per chunk to amortize dispatch
 - **Heavy per-element computation** — image processing, physics simulation, compression
 - **Any workload where each chunk runs >5ms** on a single core
 
-### DON'T: Parallelize These
+### DON'T: parallelize these
 
 - **Simple reductions** (sum, min, max) — main-thread loop is faster than worker dispatch
 - **Trivial transforms** (multiply, add constant) — memory-bandwidth bound, not CPU-bound
@@ -306,13 +360,13 @@ The benchmarks tell a clear story: **worker parallelism pays off when each chunk
 - **Single function calls** — multicore is for **batches**, not individual invocations
 - **I/O-bound work** — fetch, file reads, DB queries are already async; workers add overhead
 
-### DO: Use Loop-Unrolled Ops
+### DO: use loop-unrolled ops
 
 - **`matmul`** for matrix multiplication, neural network layers (2x+ speedup)
 - **`matadd`** for accumulating matrices (2.1x)
 - **`dotProduct`** for embedding similarity, cosine distance, attention scores (1.5x+ speedup)
 
-### Key Principles
+### Key principles
 
 1. **Measure first.** The `threshold` option exists so small inputs fall back to the main thread automatically. But "small" depends on your workload — a 10K-element array of simple additions is too small; a 10K-element array of 1000-round hash stretches is perfect.
 
@@ -324,7 +378,9 @@ The benchmarks tell a clear story: **worker parallelism pays off when each chunk
 
 5. **Use `eager: true` (or `warmup()`) for latency-sensitive paths.** By default, worker pools are created lazily on first call. Pre-spawn workers when the first call must be fast.
 
-## Pattern: Crypto/Compression Worker
+## Patterns
+
+### Crypto/compression worker
 
 ```ts
 import { multicore } from "defuss-multicore";
@@ -364,7 +420,7 @@ const parallelCRC32 = multicore(
 const checksums = await parallelCRC32(messageIndices);
 ```
 
-## Pattern: Streaming Results
+### Streaming results
 
 ```ts
 const parallel = multicore(heavyComputation);
@@ -380,7 +436,7 @@ for await (const { index, value } of pool.stream("taskName", jobs)) {
 }
 ```
 
-## Pattern: Cancellation
+### Cancellation
 
 ```ts
 const controller = new AbortController();
@@ -398,26 +454,21 @@ try {
 }
 ```
 
-## Testing
+## What "verified" means
 
-```bash
-# Unit tests (293 tests, Node)
-bun run test
+Every claim in this README is backed by a suite you can run. A missing check counts as unverified, and unverified fails `bun run verify`.
 
-# Browser E2E tests via Playwright (25 tests, real Chromium)
-bun run test:browser
+- `bun run test` — 293 unit tests on Node.js (`worker_threads`): partitioning, transfer ownership, cancellation, crash isolation, queue bounds
+- `bun run test:browser` — 25 E2E tests in real Chromium via Playwright (Web Workers, no mocks)
+- `bun run test:production` — builds the Vite example with the production bundler and runs real browser workers against the built artifact
+- `bun run test:package` — installs the published tarball in an isolated directory and exercises both the ESM and the CJS entry points
+- `bun run verify` — all of the above plus `tsc` typechecks, including compile-time negative tests for wrong result types
 
-# Production smoke test (Vite build + real browser workers)
-bun run test:production
+Browser tests need Chromium: `bunx playwright install chromium`, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an existing executable. All `npm run ...` equivalents work as well.
 
-# Package smoke test (isolated tarball install, ESM + CJS)
-bun run test:package
+### Deliberate limits
 
-# Everything, including typechecks
-bun run verify
-```
-
-All `npm run ...` equivalents work as well. Browser tests need Chromium: `bunx playwright install chromium`, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an existing executable. Implementation and compatibility notes live in `CHANGELOG.md`.
+No automatic retries, no worker affinity, no cross-worker state synchronization, no shared-memory protocol, no distributed execution, no automatic tuning. The math kernels are synchronous and stay on the caller thread. `close()` waits for non-terminating tasks that lack timeouts — use `terminate()` to stop them. Stale-result checks and authoritative state commits remain caller responsibilities. Implementation history and compatibility notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
@@ -425,6 +476,22 @@ All `npm run ...` equivalents work as well. Browser tests need Chromium: `bunx p
 - **Bun** 1.x works as installer, script runner and runtime
 - **Browser** — any browser with Web Workers + structured clone (module workers require ES module worker support)
 
+## Citation
+
+If you use defuss-multicore in research or want to reference it, cite it as:
+
+```bibtex
+@misc{homberg2026defussmulticore,
+  author       = {Homberg, Aron},
+  affiliation  = {Independent Researcher},
+  title        = {defuss-multicore: Isomorphic Multicore Execution and Loop-Unrolled Linear Algebra for JavaScript},
+  year         = {2026},
+  version      = {0.1.0},
+  howpublished = {\url{https://www.npmjs.com/package/defuss-multicore}},
+  note         = {npm package, MIT License}
+}
+```
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

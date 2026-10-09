@@ -3,3 +3,4 @@ coverage/
 examples/vite/build/
 *.tgz
 dist/
+.playwright-mcp/
